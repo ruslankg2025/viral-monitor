@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(npm install:*)",
+      "Bash(uvicorn backend.main:app --reload --port 8001)",
+      "Bash(python -m uvicorn --version)",
+      "Bash(python -m uvicorn backend.main:app --reload --port 8001)"
+    ]
+  }
+}
