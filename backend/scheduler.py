@@ -8,6 +8,7 @@ import asyncio
 
 import structlog
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from backend.database import get_all_settings_dict
@@ -95,13 +96,11 @@ async def _auto_transcribe_outliers(settings: dict[str, str]) -> None:
 async def start_scheduler() -> None:
     global _scheduler
 
-    settings = await get_all_settings_dict()
-    interval_hours = int(settings.get("refresh_interval_hours", "6"))
-
     _scheduler = AsyncIOScheduler()
     _scheduler.add_job(
         _refresh_job,
-        trigger=IntervalTrigger(hours=interval_hours),
+        # Run at 00:00, 06:00, 12:00, 18:00 Moscow time
+        trigger=CronTrigger(hour="0,6,12,18", minute=0, timezone="Europe/Moscow"),
         id="refresh_all_bloggers",
         name="Refresh all bloggers",
         replace_existing=True,
@@ -109,7 +108,7 @@ async def start_scheduler() -> None:
         misfire_grace_time=300,
     )
     _scheduler.start()
-    logger.info("scheduler.started", interval_hours=interval_hours)
+    logger.info("scheduler.started", schedule="00/06/12/18 MSK")
 
 
 async def stop_scheduler() -> None:
@@ -119,11 +118,3 @@ async def stop_scheduler() -> None:
         logger.info("scheduler.stopped")
 
 
-def reschedule(interval_hours: int) -> None:
-    """Update scheduler interval at runtime (called when settings change)."""
-    if _scheduler and _scheduler.running:
-        _scheduler.reschedule_job(
-            "refresh_all_bloggers",
-            trigger=IntervalTrigger(hours=interval_hours),
-        )
-        logger.info("scheduler.rescheduled", interval_hours=interval_hours)
