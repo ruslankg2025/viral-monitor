@@ -15,7 +15,7 @@ from backend.schemas import BloggerProfile, VideoData
 
 logger = structlog.get_logger(__name__)
 
-ACTOR_ID = "apify/instagram-scraper"
+ACTOR_ID = "apify/instagram-reel-scraper"      # Reels/videos by username
 PROFILE_ACTOR_ID = "apify/instagram-profile-scraper"
 
 
@@ -52,8 +52,7 @@ class ApifyInstagramParser(BasePlatformParser):
         items = await self._actor.run_actor(
             ACTOR_ID,
             {
-                "directUrls": [f"https://www.instagram.com/{username}/"],
-                "resultsType": "posts",
+                "username": [username],
                 "resultsLimit": limit,
             },
             timeout_secs=180,

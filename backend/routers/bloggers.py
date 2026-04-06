@@ -38,6 +38,9 @@ from backend.schemas import (
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["bloggers"])
 
+# Guard: set of blogger_ids currently being fetched (prevents duplicate concurrent runs)
+_fetching: set[int] = set()
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -95,6 +98,12 @@ async def _background_fetch(blogger_id: int) -> None:
     from backend.database import db_session
     from datetime import datetime
 
+    # Deduplication guard — skip if already running for this blogger
+    if blogger_id in _fetching:
+        logger.info("bloggers.fetch_skipped_duplicate", blogger_id=blogger_id)
+        return
+    _fetching.add(blogger_id)
+
     try:
         settings = await get_all_settings_dict()
         max_videos = int(settings.get("max_videos_per_blogger", "50"))
@@ -120,11 +129,11 @@ async def _background_fetch(blogger_id: int) -> None:
             # Fetch videos (incremental)
             after = blogger.last_checked_at
             try:
-                videos = await parser.fetch_videos(
-                    blogger.username,
-                    limit=max_videos,
-                    after=after,
-                )
+                # Pass shorts_only flag for YouTube channels added via /shorts URL
+                fetch_kwargs: dict = dict(limit=max_videos, after=after)
+                if blogger.platform == "youtube" and blogger.niche == "__shorts__":
+                    fetch_kwargs["shorts_only"] = True
+                videos = await parser.fetch_videos(blogger.username, **fetch_kwargs)
                 for vd in videos:
                     if not vd.platform:
                         vd.platform = blogger.platform
@@ -151,6 +160,8 @@ async def _background_fetch(blogger_id: int) -> None:
 
     except Exception as exc:
         logger.error("bloggers.background_fetch_error", blogger_id=blogger_id, error=str(exc))
+    finally:
+        _fetching.discard(blogger_id)
 
 
 async def _ai_categorise_blogger(blogger_id: int) -> None:
@@ -218,7 +229,11 @@ async def create_blogger(
             detail=f"Блогер @{body.username} на {body.platform} уже добавлен",
         )
 
-    blogger = Blogger(platform=body.platform, username=body.username)
+    blogger = Blogger(
+        platform=body.platform,
+        username=body.username,
+        niche="__shorts__" if body.shorts_only else None,
+    )
     db.add(blogger)
     await db.commit()
     await db.refresh(blogger)

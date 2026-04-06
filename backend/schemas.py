@@ -56,6 +56,7 @@ class VideoData(BaseModel):
 class BloggerCreate(BaseModel):
     platform: str
     username: str
+    shorts_only: bool = False  # True when added via /@channel/shorts URL
 
     @field_validator("platform")
     @classmethod
@@ -81,8 +82,12 @@ class BloggerCreate(BaseModel):
         ):
             if v.startswith(prefix):
                 v = v[len(prefix):]
-        v = v.rstrip("/").split("/")[0].split("?")[0]
+        v = v.rstrip("/").split("?")[0]
+        # Strip trailing path segments like /shorts, /videos, /reels
+        parts = v.split("/")
+        v = parts[0]
         return v
+
 
 
 class BloggerResponse(OrmBase):

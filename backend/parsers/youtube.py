@@ -90,12 +90,15 @@ class YouTubeParser(BasePlatformParser):
         username: str,
         limit: int = 50,
         after: datetime | None = None,
+        shorts_only: bool = False,
     ) -> list[VideoData]:
         """
         Fetch latest `limit` videos from the channel.
+        If shorts_only=True, fetches from /shorts tab.
         If `after` is provided, only include videos published after that date.
         """
-        channel_url = f"https://www.youtube.com/@{username}/videos"
+        tab = "shorts" if shorts_only else "videos"
+        channel_url = f"https://www.youtube.com/@{username}/{tab}"
         opts = {
             **self._BASE_OPTS,
             "playlistend": limit,

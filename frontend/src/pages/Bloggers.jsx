@@ -23,7 +23,11 @@ export default function Bloggers() {
   })
 
   const addMutation = useMutation({
-    mutationFn: () => api.bloggers.create({ platform, username }),
+    mutationFn: () => api.bloggers.create({
+      platform,
+      username,
+      shorts_only: username.toLowerCase().includes('/shorts'),
+    }),
     onSuccess: (b) => {
       addToast(`@${b.username} добавлен. Идёт загрузка видео...`, 'success')
       qc.invalidateQueries({ queryKey: ['bloggers'] })
