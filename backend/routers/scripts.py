@@ -1,6 +1,6 @@
 """
 Scripts router.
-GET  /api/scripts              — list with filters
+GET  /api/scripts              — list with filters (scoped by account)
 POST /api/scripts/generate     — generate via AI
 GET  /api/scripts/{id}         — detail
 PUT  /api/scripts/{id}         — update
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.ai.router import ai_router
+from backend.auth import CurrentAccount
 from backend.database import get_db
 from backend.models import Script, Video
 from backend.schemas import (
@@ -42,13 +43,14 @@ def _script_to_detail(script: Script) -> ScriptDetailResponse:
 
 @router.get("/scripts", response_model=ScriptsPage)
 async def list_scripts(
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
     platform: str | None = Query(None),
     niche: str | None = Query(None),
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
 ) -> ScriptsPage:
-    stmt = select(Script)
+    stmt = select(Script).where(Script.account_id == account.id)
 
     if platform:
         stmt = stmt.where(Script.platform_target == platform.lower())
@@ -71,6 +73,7 @@ async def list_scripts(
 @router.post("/scripts/generate", response_model=list[ScriptResponse], status_code=201)
 async def generate_scripts(
     params: GenerateScriptRequest,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[ScriptResponse]:
     # Load AI analysis from linked video if provided
@@ -102,13 +105,14 @@ async def generate_scripts(
             full_text_parts.append(raw["cta"])
 
         script = Script(
+            account_id=account.id,
             video_id=params.video_id,
             title=raw.get("title") or f"Сценарий — {params.topic[:50]}",
             hook=raw.get("hook"),
             hook_visual=raw.get("hook_visual"),
             structure=scenes,
             full_text="\n\n".join(full_text_parts),
-            niche=video_niche or ai_analysis.get("niche") if ai_analysis else None,
+            niche=video_niche or (ai_analysis.get("niche") if ai_analysis else None),
             platform_target=params.platform,
             style=params.style,
             duration_target=params.duration,
@@ -129,9 +133,15 @@ async def generate_scripts(
 @router.get("/scripts/{script_id}", response_model=ScriptDetailResponse)
 async def get_script(
     script_id: int,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScriptDetailResponse:
-    result = await db.execute(select(Script).where(Script.id == script_id))
+    result = await db.execute(
+        select(Script).where(
+            Script.id == script_id,
+            Script.account_id == account.id,
+        )
+    )
     script = result.scalar_one_or_none()
     if not script:
         raise HTTPException(status_code=404, detail="Сценарий не найден")
@@ -142,9 +152,15 @@ async def get_script(
 async def update_script(
     script_id: int,
     body: ScriptUpdate,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScriptDetailResponse:
-    result = await db.execute(select(Script).where(Script.id == script_id))
+    result = await db.execute(
+        select(Script).where(
+            Script.id == script_id,
+            Script.account_id == account.id,
+        )
+    )
     script = result.scalar_one_or_none()
     if not script:
         raise HTTPException(status_code=404, detail="Сценарий не найден")
@@ -161,9 +177,15 @@ async def update_script(
 @router.delete("/scripts/{script_id}", response_model=OkResponse)
 async def delete_script(
     script_id: int,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> OkResponse:
-    result = await db.execute(select(Script).where(Script.id == script_id))
+    result = await db.execute(
+        select(Script).where(
+            Script.id == script_id,
+            Script.account_id == account.id,
+        )
+    )
     script = result.scalar_one_or_none()
     if not script:
         raise HTTPException(status_code=404, detail="Сценарий не найден")

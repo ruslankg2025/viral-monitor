@@ -1,5 +1,5 @@
 """
-SQLAlchemy 2.0 ORM models — 5 tables.
+SQLAlchemy 2.0 ORM models — multi-account system.
 All timestamps stored as UTC naive datetimes.
 """
 from __future__ import annotations
@@ -28,15 +28,105 @@ def _utcnow() -> datetime:
     return datetime.utcnow()
 
 
+# ── Accounts ──────────────────────────────────────────────────────────────────
+
+class Account(Base):
+    __tablename__ = "accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    display_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    main_profiles: Mapped[list["MainProfile"]] = relationship(
+        "MainProfile", back_populates="account", cascade="all, delete-orphan"
+    )
+    scraper_profiles: Mapped[list["ScraperProfile"]] = relationship(
+        "ScraperProfile", back_populates="account", cascade="all, delete-orphan"
+    )
+    bloggers: Mapped[list["Blogger"]] = relationship(
+        "Blogger", back_populates="account", cascade="all, delete-orphan"
+    )
+    scripts: Mapped[list["Script"]] = relationship(
+        "Script", back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class MainProfile(Base):
+    __tablename__ = "main_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)  # instagram | tiktok
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    followers_count: Mapped[int] = mapped_column(Integer, default=0)
+    session_json: Mapped[str | None] = mapped_column(Text, nullable=True)  # instagrapi session
+    status: Mapped[str] = mapped_column(
+        String(20), default="not_logged_in"
+    )  # active|expired|banned|not_logged_in
+    # Profile/generation settings
+    niche: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    tone: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # conversational|expert|energetic|calm|custom
+    tone_custom: Mapped[str | None] = mapped_column(Text, nullable=True)
+    video_format: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # head+visual|head_only|screencast|custom
+    video_format_custom: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audience_desc: Mapped[str | None] = mapped_column(Text, nullable=True)
+    banned_words: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    account: Mapped["Account"] = relationship("Account", back_populates="main_profiles")
+
+
+class ScraperProfile(Base):
+    __tablename__ = "scraper_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    platform: Mapped[str] = mapped_column(String(20), nullable=False)  # instagram | tiktok
+    username: Mapped[str] = mapped_column(String(100), nullable=False)
+    password: Mapped[str | None] = mapped_column(
+        String(200), nullable=True
+    )  # stored for re-login
+    session_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(20), default="not_logged_in"
+    )  # active|expired|banned|not_logged_in
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+    account: Mapped["Account"] = relationship("Account", back_populates="scraper_profiles")
+
+
 # ── Bloggers ──────────────────────────────────────────────────────────────────
 
 class Blogger(Base):
     __tablename__ = "bloggers"
     __table_args__ = (
-        UniqueConstraint("platform", "username", name="uq_blogger_platform_username"),
+        UniqueConstraint(
+            "account_id", "platform", "username",
+            name="uq_blogger_account_platform_username",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     platform: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     username: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
@@ -51,6 +141,7 @@ class Blogger(Base):
     )
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    account: Mapped["Account | None"] = relationship("Account", back_populates="bloggers")
     videos: Mapped[list["Video"]] = relationship(
         "Video",
         back_populates="blogger",
@@ -116,6 +207,12 @@ class Script(Base):
     __tablename__ = "scripts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("accounts.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
     video_id: Mapped[int | None] = mapped_column(
         Integer,
         ForeignKey("videos.id", ondelete="SET NULL"),
@@ -137,6 +234,7 @@ class Script(Base):
         DateTime, onupdate=_utcnow, nullable=True
     )
 
+    account: Mapped["Account | None"] = relationship("Account", back_populates="scripts")
     video: Mapped["Video | None"] = relationship("Video", back_populates="scripts")
 
 

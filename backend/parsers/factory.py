@@ -24,16 +24,24 @@ class ParserFactory:
             return YouTubeParser()
 
         elif p == "instagram":
+            session_id = settings.get("instagram_session_id", "").strip()
             apify_key = settings.get("apify_api_key", "")
             prefer_apify = settings.get("parser_instagram", "apify") == "apify"
-            if prefer_apify and apify_key:
+
+            if session_id:
+                # instagrapi uses private mobile API — most reliable with session cookie
+                from backend.parsers.instagram_instagrapi import InstagrapiInstagramParser
+                logger.info("parser_factory.instagram=instagrapi")
+                return InstagrapiInstagramParser(session_id)
+            elif prefer_apify and apify_key:
+                # Apify — works without session but requires residential proxies (paid)
                 from backend.parsers.instagram_apify import ApifyInstagramParser
-                logger.debug("parser_factory.instagram=apify")
+                logger.info("parser_factory.instagram=apify")
                 return ApifyInstagramParser(apify_key)
             else:
                 from backend.parsers.instagram_legacy import LegacyInstagramParser
-                logger.debug("parser_factory.instagram=legacy")
-                return LegacyInstagramParser(settings.get("instagram_session_id"))
+                logger.info("parser_factory.instagram=legacy_anon")
+                return LegacyInstagramParser(None)
 
         elif p == "tiktok":
             apify_key = settings.get("apify_api_key", "")
@@ -53,6 +61,25 @@ class ParserFactory:
 
         else:
             raise ValueError(f"Неизвестная платформа: {platform}")
+
+    def get_instagram_parser_for_account(
+        self,
+        scraper_session_json: str | None,
+        apify_key: str,
+    ) -> BasePlatformParser:
+        """Return the best Instagram parser given a scraper session (if any)."""
+        if scraper_session_json:
+            from backend.parsers.instagram_instagrapi import InstagrapiInstagramParser
+            logger.info("parser_factory.instagram=instagrapi_session_json")
+            return InstagrapiInstagramParser(session_json=scraper_session_json)
+        elif apify_key:
+            from backend.parsers.instagram_apify import ApifyInstagramParser
+            logger.info("parser_factory.instagram=apify")
+            return ApifyInstagramParser(apify_key)
+        else:
+            from backend.parsers.instagram_legacy import LegacyInstagramParser
+            logger.info("parser_factory.instagram=legacy_anon")
+            return LegacyInstagramParser(None)
 
 
 # Module-level singleton

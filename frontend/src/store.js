@@ -1,10 +1,22 @@
 import { create } from 'zustand'
 
 /**
- * Global UI state (filters, toasts, modals).
+ * Global UI state (filters, toasts, modals, auth).
  * Server data lives in React Query — not here.
  */
 export const useStore = create((set, get) => ({
+  // ── Account / Auth ─────────────────────────────────────────────────────────
+  currentAccount: null,
+  currentToken: localStorage.getItem('vm_token') || null,
+  setAccount: (account) => set({ currentAccount: account }),
+  setToken: (token) => {
+    localStorage.setItem('vm_token', token)
+    set({ currentToken: token })
+  },
+  logout: () => {
+    localStorage.removeItem('vm_token')
+    set({ currentToken: null, currentAccount: null })
+  },
   // ── Feed filters ───────────────────────────────────────────────────────────
   filters: {
     tab: 'all',       // 'all' | 'outliers' | 'favorited'

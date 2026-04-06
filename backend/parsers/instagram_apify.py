@@ -15,15 +15,16 @@ from backend.schemas import BloggerProfile, VideoData
 
 logger = structlog.get_logger(__name__)
 
-ACTOR_ID = "apify/instagram-reel-scraper"      # Reels/videos by username
+ACTOR_ID = "apify/instagram-scraper"            # Posts/reels by username
 PROFILE_ACTOR_ID = "apify/instagram-profile-scraper"
 
 
 class ApifyInstagramParser(BasePlatformParser):
     platform = "instagram"
 
-    def __init__(self, api_key: str) -> None:
+    def __init__(self, api_key: str, session_id: str | None = None) -> None:
         self._actor = ApifyActorClient(api_key)
+        self._session_id = session_id or ""
 
     async def fetch_profile(self, username: str) -> BloggerProfile:
         items = await self._actor.run_actor(
@@ -49,17 +50,24 @@ class ApifyInstagramParser(BasePlatformParser):
         limit: int = 50,
         after: datetime | None = None,
     ) -> list[VideoData]:
-        items = await self._actor.run_actor(
-            ACTOR_ID,
-            {
-                "username": [username],
-                "resultsLimit": limit,
-            },
-            timeout_secs=180,
-        )
+        run_input: dict = {
+            "usernames": [username],
+            "resultsType": "posts",
+            "resultsLimit": limit,
+        }
+        if self._session_id:
+            run_input["sessionCookies"] = [
+                {"name": "sessionid", "value": self._session_id, "domain": ".instagram.com"}
+            ]
+
+        items = await self._actor.run_actor(ACTOR_ID, run_input, timeout_secs=180)
 
         videos: list[VideoData] = []
         for item in items:
+            # Skip non-video posts
+            if not item.get("isVideo") and not item.get("is_video") and not item.get("videoViewCount"):
+                continue
+
             published = _parse_timestamp(item.get("timestamp") or item.get("taken_at_timestamp"))
             if after and published and published <= after:
                 continue

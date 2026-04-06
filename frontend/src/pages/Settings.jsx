@@ -294,7 +294,7 @@ export default function Settings() {
           description="Для парсинга VK видео"
           values={values} onChange={onChange} />
         <ApiKeyField settingKey="instagram_session_id"
-          description="Для instaloader (fallback парсер Instagram)"
+          description="Instagram sessionid cookie — нужен для парсинга (Apify + instaloader). Открой Instagram в браузере → DevTools → Application → Cookies → sessionid"
           values={values} onChange={onChange} />
       </Section>
 

@@ -1,14 +1,24 @@
 /**
  * Typed fetch wrapper for the Viral Monitor API.
- * Base URL: /api (proxied by Vite to localhost:8000)
+ * Base URL: /api (proxied by Vite to localhost:8001)
  */
+import { useStore } from './store.js'
 
 const BASE = '/api'
 
-async function request(method, path, body, isFormData = false) {
+function getAuthHeaders() {
+  const token = useStore.getState().currentToken
+  return token ? { 'X-Account-Token': token } : {}
+}
+
+async function request(method, path, body, isFormData = false, extraHeaders = {}) {
   const options = {
     method,
-    headers: isFormData ? {} : { 'Content-Type': 'application/json' },
+    headers: {
+      ...getAuthHeaders(),
+      ...extraHeaders,
+      ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    },
   }
   if (body) {
     options.body = isFormData ? body : JSON.stringify(body)
@@ -16,11 +26,24 @@ async function request(method, path, body, isFormData = false) {
 
   const res = await fetch(`${BASE}${path}`, options)
 
+  if (res.status === 401) {
+    // Token expired or missing — clear it
+    useStore.getState().logout()
+    throw new Error('Сессия истекла. Войдите снова.')
+  }
+
   if (!res.ok) {
     let detail = `HTTP ${res.status}`
     try {
       const err = await res.json()
-      detail = err.detail || detail
+      if (typeof err.detail === 'string') {
+        detail = err.detail
+      } else if (Array.isArray(err.detail)) {
+        // Pydantic validation errors: [{loc, msg, type}, ...]
+        detail = err.detail.map((e) => e.msg || JSON.stringify(e)).join('; ')
+      } else if (err.detail) {
+        detail = JSON.stringify(err.detail)
+      }
     } catch {}
     throw new Error(detail)
   }
@@ -29,8 +52,8 @@ async function request(method, path, body, isFormData = false) {
   return res.json()
 }
 
-const get = (path) => request('GET', path)
-const post = (path, body) => request('POST', path, body)
+const get = (path, extraHeaders) => request('GET', path, undefined, false, extraHeaders)
+const post = (path, body, extraHeaders) => request('POST', path, body, false, extraHeaders)
 const put = (path, body) => request('PUT', path, body)
 const del = (path) => request('DELETE', path)
 
@@ -115,5 +138,32 @@ export const api = {
       })
       return get(`/my-videos?${q}`)
     },
+  },
+
+  // ── Accounts ──────────────────────────────────────────────────────────────
+  accounts: {
+    me: () => get('/accounts/me'),
+    mainProfiles: () => get('/accounts/me/main-profiles'),
+    addMainProfile: (data) => post('/accounts/me/main-profiles', data),
+    loginMainProfile: (id, creds) =>
+      post(`/accounts/me/main-profiles/${id}/login`, creds),
+    updateMainProfileSettings: (id, settings) =>
+      post(`/accounts/me/main-profiles/${id}/settings`, settings),
+    deleteMainProfile: (id) => del(`/accounts/me/main-profiles/${id}`),
+    scraperProfiles: () => get('/accounts/me/scraper-profiles'),
+    addScraperProfile: (data) => post('/accounts/me/scraper-profiles', data),
+    loginScraperProfile: (id, creds) =>
+      post(`/accounts/me/scraper-profiles/${id}/login`, creds),
+    deleteScraperProfile: (id) => del(`/accounts/me/scraper-profiles/${id}`),
+  },
+
+  // ── Admin ─────────────────────────────────────────────────────────────────
+  admin: {
+    listAccounts: (adminKey) =>
+      get('/accounts', { 'X-Admin-Key': adminKey }),
+    createAccount: (data, adminKey) =>
+      post('/accounts', data, { 'X-Admin-Key': adminKey }),
+    deleteAccount: (id, adminKey) =>
+      request('DELETE', `/accounts/${id}`, undefined, false, { 'X-Admin-Key': adminKey }),
   },
 }

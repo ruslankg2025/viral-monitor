@@ -82,9 +82,12 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "http://localhost:5174",
         "http://127.0.0.1:5174",
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -105,19 +108,23 @@ async def global_exception_handler(request, exc: Exception) -> JSONResponse:
 
 # ── Routers ────────────────────────────────────────────────────────────────────
 
+from backend.routers.accounts import router as accounts_router
 from backend.routers.bloggers import router as bloggers_router
 from backend.routers.videos import router as videos_router
 from backend.routers.analysis import router as analysis_router
 from backend.routers.scripts import router as scripts_router
 from backend.routers.settings import router as settings_router
 from backend.routers.analyze import router as analyze_router
+from backend.routers.proxy import router as proxy_router
 
+app.include_router(accounts_router, prefix="/api")
 app.include_router(bloggers_router, prefix="/api")
 app.include_router(videos_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(scripts_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(analyze_router, prefix="/api")
+app.include_router(proxy_router, prefix="/api")
 
 
 @app.get("/api/health")

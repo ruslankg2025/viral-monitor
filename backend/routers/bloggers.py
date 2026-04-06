@@ -2,7 +2,7 @@
 Bloggers CRUD router.
 POST /api/bloggers      — add single blogger
 POST /api/bloggers/import — bulk CSV import
-GET  /api/bloggers      — list all
+GET  /api/bloggers      — list all (scoped by account)
 DELETE /api/bloggers/{id} — delete with cascade
 POST /api/bloggers/{id}/refresh — trigger background refresh
 """
@@ -15,7 +15,7 @@ from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,8 +24,9 @@ from backend.analyzer import (
     recalculate_all_x_factors,
     update_blogger_stats,
 )
+from backend.auth import CurrentAccount
 from backend.database import get_all_settings_dict, get_db
-from backend.models import Blogger, Video
+from backend.models import Blogger, ScraperProfile, Video
 from backend.parsers.factory import parser_factory
 from backend.schemas import (
     BloggerCreate,
@@ -48,15 +49,28 @@ def _blogger_to_response(blogger: Blogger) -> BloggerResponse:
     return BloggerResponse.model_validate(blogger)
 
 
+async def _prune_videos(db: AsyncSession, blogger_id: int, max_keep: int) -> None:
+    """Keep only top max_keep videos by views for a blogger; delete the rest."""
+    result = await db.execute(
+        select(Video.id).where(Video.blogger_id == blogger_id).order_by(Video.views.desc())
+    )
+    all_ids = [row[0] for row in result.all()]
+    if len(all_ids) > max_keep:
+        ids_to_delete = all_ids[max_keep:]
+        await db.execute(delete(Video).where(Video.id.in_(ids_to_delete)))
+        await db.commit()
+        logger.info("bloggers.videos_pruned", blogger_id=blogger_id, kept=max_keep, deleted=len(ids_to_delete))
+
+
 async def _upsert_videos(
     db: AsyncSession,
     blogger: Blogger,
     video_data_list: list,
     settings: dict[str, str],
 ) -> int:
-    """Insert new videos (skip existing), compute X-factor. Returns count of new videos."""
-    from backend.database import get_all_settings_dict
+    """Insert new videos (skip existing), compute X-factor, prune to top N by views. Returns count of new videos."""
     threshold = float(settings.get("outlier_threshold", "3.0"))
+    max_keep = int(settings.get("max_videos_per_blogger", "50"))
     new_count = 0
 
     for vd in video_data_list:
@@ -90,6 +104,7 @@ async def _upsert_videos(
         new_count += 1
 
     await db.commit()
+    await _prune_videos(db, blogger.id, max_keep)
     return new_count
 
 
@@ -115,7 +130,23 @@ async def _background_fetch(blogger_id: int) -> None:
             if not blogger:
                 return
 
-            parser = parser_factory.get_parser(blogger.platform, settings)
+            # Get scraper profile for this account + platform
+            parser = None
+            if blogger.account_id and blogger.platform == "instagram":
+                scraper_result = await db.execute(
+                    select(ScraperProfile).where(
+                        ScraperProfile.account_id == blogger.account_id,
+                        ScraperProfile.platform == blogger.platform,
+                        ScraperProfile.status == "active",
+                    ).limit(1)
+                )
+                scraper = scraper_result.scalar_one_or_none()
+                if scraper and scraper.session_json:
+                    from backend.parsers.instagram_instagrapi import InstagrapiInstagramParser
+                    parser = InstagrapiInstagramParser(session_json=scraper.session_json)
+
+            if parser is None:
+                parser = parser_factory.get_parser(blogger.platform, settings)
 
             # Fetch profile
             try:
@@ -143,6 +174,9 @@ async def _background_fetch(blogger_id: int) -> None:
 
             if videos:
                 await _upsert_videos(db, blogger, videos, settings)
+            else:
+                # Even without new videos — prune existing to max_keep by views
+                await _prune_videos(db, blogger.id, max_videos)
 
             # Recalculate stats
             new_avg = await update_blogger_stats(db, blogger_id)
@@ -204,8 +238,15 @@ async def _ai_categorise_blogger(blogger_id: int) -> None:
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/bloggers", response_model=list[BloggerResponse])
-async def list_bloggers(db: Annotated[AsyncSession, Depends(get_db)]) -> list[BloggerResponse]:
-    result = await db.execute(select(Blogger).order_by(Blogger.created_at.desc()))
+async def list_bloggers(
+    account: CurrentAccount,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[BloggerResponse]:
+    result = await db.execute(
+        select(Blogger)
+        .where(Blogger.account_id == account.id)
+        .order_by(Blogger.created_at.desc())
+    )
     bloggers = result.scalars().all()
     return [_blogger_to_response(b) for b in bloggers]
 
@@ -214,11 +255,13 @@ async def list_bloggers(db: Annotated[AsyncSession, Depends(get_db)]) -> list[Bl
 async def create_blogger(
     body: BloggerCreate,
     background_tasks: BackgroundTasks,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BloggerResponse:
-    # Check for duplicates
+    # Check for duplicates within this account
     existing = await db.execute(
         select(Blogger).where(
+            Blogger.account_id == account.id,
             Blogger.platform == body.platform,
             Blogger.username == body.username,
         )
@@ -230,6 +273,7 @@ async def create_blogger(
         )
 
     blogger = Blogger(
+        account_id=account.id,
         platform=body.platform,
         username=body.username,
         niche="__shorts__" if body.shorts_only else None,
@@ -249,6 +293,7 @@ async def create_blogger(
 async def import_bloggers(
     file: UploadFile,
     background_tasks: BackgroundTasks,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BloggerImportResult:
     """
@@ -289,6 +334,7 @@ async def import_bloggers(
 
         existing = await db.execute(
             select(Blogger).where(
+                Blogger.account_id == account.id,
                 Blogger.platform == body.platform,
                 Blogger.username == body.username,
             )
@@ -297,7 +343,11 @@ async def import_bloggers(
             skipped += 1
             continue
 
-        blogger = Blogger(platform=body.platform, username=body.username)
+        blogger = Blogger(
+            account_id=account.id,
+            platform=body.platform,
+            username=body.username,
+        )
         db.add(blogger)
         try:
             await db.flush()
@@ -314,9 +364,15 @@ async def import_bloggers(
 @router.delete("/bloggers/{blogger_id}", response_model=OkResponse)
 async def delete_blogger(
     blogger_id: int,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> OkResponse:
-    result = await db.execute(select(Blogger).where(Blogger.id == blogger_id))
+    result = await db.execute(
+        select(Blogger).where(
+            Blogger.id == blogger_id,
+            Blogger.account_id == account.id,
+        )
+    )
     blogger = result.scalar_one_or_none()
     if not blogger:
         raise HTTPException(status_code=404, detail="Блогер не найден")
@@ -331,9 +387,15 @@ async def delete_blogger(
 async def refresh_blogger(
     blogger_id: int,
     background_tasks: BackgroundTasks,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> StatusResponse:
-    result = await db.execute(select(Blogger).where(Blogger.id == blogger_id))
+    result = await db.execute(
+        select(Blogger).where(
+            Blogger.id == blogger_id,
+            Blogger.account_id == account.id,
+        )
+    )
     blogger = result.scalar_one_or_none()
     if not blogger:
         raise HTTPException(status_code=404, detail="Блогер не найден")

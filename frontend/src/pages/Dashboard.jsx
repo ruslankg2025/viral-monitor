@@ -1,4 +1,3 @@
-import React, { useState } from 'react'
 import { useInfiniteQuery } from '@tanstack/react-query'
 import { api } from '../api.js'
 import { useStore } from '../store.js'
@@ -104,7 +103,7 @@ export default function Dashboard() {
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
             gap: 16,
           }}
         >
@@ -129,7 +128,7 @@ export default function Dashboard() {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
               gap: 16,
               marginBottom: 24,
             }}

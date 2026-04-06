@@ -91,15 +91,82 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
 
 # ── Initialisation ────────────────────────────────────────────────────────────
 async def init_db() -> None:
-    """Create all tables and seed default settings."""
-    from backend.models import Blogger, Video, Script, Setting, APIUsageLog  # noqa: F401
+    """Create all tables, seed default settings, and migrate existing data."""
+    from backend.models import (  # noqa: F401
+        Account, MainProfile, ScraperProfile,
+        Blogger, Video, Script, Setting, APIUsageLog,
+    )
 
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     await _seed_settings()
+    token = await _seed_default_account()
+    if token:
+        logger.info("database.default_account_created", token=token,
+                    note="Save this token — it's your login key")
     logger.info("database.initialised")
+
+
+async def _seed_default_account() -> str | None:
+    """Create default account for existing data migration. Returns token if created."""
+    import secrets
+    from sqlalchemy import select, update, text
+    from backend.models import Account, Blogger, Script
+
+    # First: add missing columns via ALTER TABLE (SQLite won't auto-add columns to existing tables)
+    engine = get_engine()
+    async with engine.begin() as conn:
+        # Check if account_id column exists in bloggers
+        result = await conn.execute(text("PRAGMA table_info(bloggers)"))
+        cols = [row[1] for row in result.fetchall()]
+        if "account_id" not in cols:
+            await conn.execute(text("ALTER TABLE bloggers ADD COLUMN account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE"))
+            logger.info("database.migration.bloggers_account_id_added")
+
+        # Check if account_id column exists in scripts
+        result = await conn.execute(text("PRAGMA table_info(scripts)"))
+        cols = [row[1] for row in result.fetchall()]
+        if "account_id" not in cols:
+            await conn.execute(text("ALTER TABLE scripts ADD COLUMN account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE"))
+            logger.info("database.migration.scripts_account_id_added")
+
+        # Drop old unique constraint if it exists (SQLite can't drop constraints, but it was
+        # created with create_all so the new constraint name will be used for new DBs.
+        # For existing DBs, we just live with the old constraint name.)
+
+    async with db_session() as session:
+        existing = await session.execute(select(Account).limit(1))
+        if existing.scalar_one_or_none():
+            # Account already exists — just re-migrate any null account_ids
+            first_account = (await session.execute(select(Account).order_by(Account.id).limit(1))).scalar_one()
+            await session.execute(
+                update(Blogger).where(Blogger.account_id == None).values(account_id=first_account.id)  # noqa: E711
+            )
+            await session.execute(
+                update(Script).where(Script.account_id == None).values(account_id=first_account.id)  # noqa: E711
+            )
+            await session.commit()
+            return None
+
+        # Create default account
+        token = secrets.token_hex(32)
+        account = Account(token=token, display_name="Default", is_admin=True)
+        session.add(account)
+        await session.flush()
+        account_id = account.id
+
+        # Migrate existing bloggers
+        await session.execute(
+            update(Blogger).where(Blogger.account_id == None).values(account_id=account_id)  # noqa: E711
+        )
+        # Migrate existing scripts
+        await session.execute(
+            update(Script).where(Script.account_id == None).values(account_id=account_id)  # noqa: E711
+        )
+        await session.commit()
+        return token
 
 
 async def _seed_settings() -> None:

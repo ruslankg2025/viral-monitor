@@ -91,10 +91,21 @@ async def update_settings(
 async def refresh_all_bloggers(
     background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_account_token: str | None = None,
 ) -> StatusResponse:
-    result = await db.execute(
-        select(Blogger).where(Blogger.is_active == True)  # noqa: E712
-    )
+    from sqlalchemy import select as sa_select
+    from backend.models import Account
+
+    stmt = sa_select(Blogger).where(Blogger.is_active == True)  # noqa: E712
+
+    # Scope to account if token provided
+    if x_account_token:
+        acc_result = await db.execute(sa_select(Account).where(Account.token == x_account_token))
+        acc = acc_result.scalar_one_or_none()
+        if acc:
+            stmt = stmt.where(Blogger.account_id == acc.id)
+
+    result = await db.execute(stmt)
     bloggers = result.scalars().all()
 
     from backend.routers.bloggers import _background_fetch

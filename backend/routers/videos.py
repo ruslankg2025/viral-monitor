@@ -1,6 +1,6 @@
 """
 Videos router.
-GET  /api/videos          — paginated feed with filters
+GET  /api/videos          — paginated feed with filters (scoped by account)
 GET  /api/videos/{id}     — video detail
 POST /api/videos/{id}/favorite — toggle favourite
 """
@@ -15,6 +15,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from backend.auth import CurrentAccount
 from backend.database import get_db
 from backend.models import Blogger, Video
 from backend.schemas import (
@@ -52,6 +53,7 @@ def _make_video_detail(video: Video) -> VideoDetailResponse:
 
 @router.get("/videos", response_model=VideosPage)
 async def list_videos(
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
     platform: str | None = Query(None),
     blogger_id: int | None = Query(None),
@@ -66,6 +68,7 @@ async def list_videos(
         select(Video)
         .join(Blogger, Video.blogger_id == Blogger.id)
         .options(selectinload(Video.blogger))
+        .where(Blogger.account_id == account.id)
     )
 
     # Filters
@@ -120,12 +123,14 @@ async def list_videos(
 @router.get("/videos/{video_id}", response_model=VideoDetailResponse)
 async def get_video(
     video_id: int,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> VideoDetailResponse:
     result = await db.execute(
         select(Video)
+        .join(Blogger, Video.blogger_id == Blogger.id)
         .options(selectinload(Video.blogger))
-        .where(Video.id == video_id)
+        .where(Video.id == video_id, Blogger.account_id == account.id)
     )
     video = result.scalar_one_or_none()
     if not video:
@@ -136,9 +141,14 @@ async def get_video(
 @router.post("/videos/{video_id}/favorite", response_model=FavoriteToggleResponse)
 async def toggle_favorite(
     video_id: int,
+    account: CurrentAccount,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> FavoriteToggleResponse:
-    result = await db.execute(select(Video).where(Video.id == video_id))
+    result = await db.execute(
+        select(Video)
+        .join(Blogger, Video.blogger_id == Blogger.id)
+        .where(Video.id == video_id, Blogger.account_id == account.id)
+    )
     video = result.scalar_one_or_none()
     if not video:
         raise HTTPException(status_code=404, detail="Видео не найдено")

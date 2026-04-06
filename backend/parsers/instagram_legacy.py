@@ -35,12 +35,19 @@ class LegacyInstagramParser(BasePlatformParser):
         )
         if self._session_id:
             try:
-                loader.load_session_from_file(
-                    username="",
-                    filename=None,
+                from urllib.parse import unquote
+                # Decode URL-encoded cookie value (e.g. %3A → :)
+                session_id = unquote(self._session_id.strip())
+                user_id = session_id.split(":")[0]
+                loader.context._session.cookies.set(
+                    "sessionid", session_id, domain=".instagram.com"
                 )
-            except Exception:
-                pass
+                loader.context._session.cookies.set(
+                    "ds_user_id", user_id, domain=".instagram.com"
+                )
+                logger.info("instagram_legacy.session_injected", user_id=user_id)
+            except Exception as exc:
+                logger.warning("instagram_legacy.session_inject_failed", error=str(exc))
         return loader
 
     async def fetch_profile(self, username: str) -> BloggerProfile:
@@ -79,7 +86,18 @@ class LegacyInstagramParser(BasePlatformParser):
             try:
                 profile = instaloader.Profile.from_username(loader.context, username)
                 count = 0
-                for post in profile.get_posts():
+                # Try get_reels first (dedicated endpoint for Reels), fallback to get_posts
+                try:
+                    posts_iter = profile.get_reels()
+                    # peek first item to validate
+                    first = next(iter(posts_iter), None)
+                    if first is None:
+                        raise StopIteration
+                    import itertools
+                    posts_iter = itertools.chain([first], posts_iter)
+                except Exception:
+                    posts_iter = profile.get_posts()
+                for post in posts_iter:
                     if count >= limit:
                         break
                     if not post.is_video:

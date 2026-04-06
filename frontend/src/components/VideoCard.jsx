@@ -40,10 +40,14 @@ export default function VideoCard({ video }) {
       onClick={() => navigate(`/video/${video.id}`)}
     >
       {/* Thumbnail */}
-      <div style={{ position: 'relative', paddingTop: '56.25%', background: '#0f0f0f' }}>
+      <div style={{ position: 'relative', paddingTop: '133%', background: '#0f0f0f' }}>
         {video.thumbnail_url ? (
           <img
-            src={video.thumbnail_url}
+            src={
+              video.platform === 'instagram'
+                ? `/api/proxy/image?url=${encodeURIComponent(video.thumbnail_url)}`
+                : video.thumbnail_url
+            }
             alt={video.title}
             style={{
               position: 'absolute',

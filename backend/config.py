@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     refresh_interval_hours: int = Field(default=6, alias="REFRESH_INTERVAL_HOURS")
     max_videos_per_blogger: int = Field(default=50, alias="MAX_VIDEOS_PER_BLOGGER")
 
+    # ── Admin ─────────────────────────────────────────────────────────────────
+    admin_key: str = Field(default="", alias="ADMIN_KEY")
+
     # ── Logging ───────────────────────────────────────────────────────────────
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     log_file: str = Field(default="logs/app.log", alias="LOG_FILE")

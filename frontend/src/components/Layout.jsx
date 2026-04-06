@@ -1,6 +1,18 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Users, FileText, Settings, RefreshCw, Zap, Sparkles, History } from 'lucide-react'
+import {
+  LayoutDashboard,
+  Users,
+  FileText,
+  Settings,
+  RefreshCw,
+  Zap,
+  Sparkles,
+  History,
+  UserCircle,
+  LogOut,
+  ChevronDown,
+} from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api.js'
 import { useStore } from '../store.js'
@@ -12,8 +24,108 @@ const NAV_ITEMS = [
   { to: '/dashboard', icon: LayoutDashboard, label: 'Тренды' },
   { to: '/bloggers', icon: Users, label: 'Блогеры' },
   { to: '/scripts', icon: FileText, label: 'Сценарии' },
+  { to: '/profile', icon: UserCircle, label: 'Профиль' },
   { to: '/settings', icon: Settings, label: 'Настройки' },
 ]
+
+function AccountSwitcher() {
+  const [open, setOpen] = useState(false)
+  const { currentAccount, logout } = useStore()
+  const navigate = useNavigate()
+
+  const displayName =
+    currentAccount?.main_profiles?.[0]?.username ||
+    currentAccount?.display_name ||
+    'Аккаунт'
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          padding: '6px 10px',
+          background: 'transparent',
+          border: '1px solid var(--border)',
+          borderRadius: 6,
+          color: 'var(--text-secondary)',
+          fontSize: 12,
+          cursor: 'pointer',
+          width: '100%',
+        }}
+      >
+        <UserCircle size={14} />
+        <span style={{ flex: 1, textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {displayName}
+        </span>
+        <ChevronDown size={12} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '100%',
+            left: 0,
+            right: 0,
+            marginBottom: 4,
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            borderRadius: 8,
+            overflow: 'hidden',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.3)',
+            zIndex: 100,
+          }}
+        >
+          <button
+            onClick={() => {
+              setOpen(false)
+              navigate('/profile')
+            }}
+            style={dropdownItemStyle}
+          >
+            <UserCircle size={13} />
+            Настройки профиля
+          </button>
+          <div style={{ height: 1, background: 'var(--border)' }} />
+          <button
+            onClick={() => {
+              setOpen(false)
+              logout()
+            }}
+            style={{ ...dropdownItemStyle, color: '#ef4444' }}
+          >
+            <LogOut size={13} />
+            Выйти
+          </button>
+        </div>
+      )}
+
+      {open && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 99 }}
+          onClick={() => setOpen(false)}
+        />
+      )}
+    </div>
+  )
+}
+
+const dropdownItemStyle = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '10px 12px',
+  background: 'transparent',
+  border: 'none',
+  color: 'var(--text-secondary)',
+  fontSize: 13,
+  cursor: 'pointer',
+  width: '100%',
+  textAlign: 'left',
+}
 
 export default function Layout() {
   const addToast = useStore((s) => s.addToast)
@@ -128,6 +240,7 @@ export default function Layout() {
               fontSize: 13,
               cursor: refreshMutation.isPending ? 'not-allowed' : 'pointer',
               opacity: refreshMutation.isPending ? 0.6 : 1,
+              marginBottom: 12,
             }}
           >
             <RefreshCw
@@ -138,6 +251,8 @@ export default function Layout() {
             />
             Обновить всё
           </button>
+
+          <AccountSwitcher />
         </div>
       </aside>
 
