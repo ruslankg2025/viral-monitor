@@ -91,11 +91,29 @@ export const api = {
     refreshAll: () => post('/refresh/all'),
     recalculate: () => post('/recalculate'),
     clearCosts: () => del('/costs/clear'),
+    validateKey: (provider, api_key) => post('/settings/validate', { provider, api_key }),
+    providersStatus: () => get('/settings/providers-status'),
   },
 
   // ── Stats & Costs ─────────────────────────────────────────────────────────
   stats: {
     get: () => get('/stats'),
     costs: (period = 'month') => get(`/costs?period=${period}`),
+  },
+
+  // ── Analyze URL (Piratex-like) ────────────────────────────────────────────
+  analyze: {
+    byUrl: (url) => post('/analyze-url', { url }),
+    getVideoFull: (id) => get(`/videos/${id}/full`),
+    generateHooks: (id) => post(`/videos/${id}/generate-hooks`),
+    improve: (id, action, current_text, custom_prompt) =>
+      post(`/videos/${id}/improve`, { action, current_text, custom_prompt }),
+    myVideos: (params = {}) => {
+      const q = new URLSearchParams()
+      Object.entries(params).forEach(([k, v]) => {
+        if (v !== undefined && v !== null && v !== '') q.set(k, String(v))
+      })
+      return get(`/my-videos?${q}`)
+    },
   },
 }

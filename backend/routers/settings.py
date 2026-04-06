@@ -1,11 +1,13 @@
 """
 Settings router.
-GET  /api/settings          — all settings
-PUT  /api/settings          — batch update
-POST /api/refresh/all       — trigger refresh for all bloggers
-POST /api/recalculate       — recalculate all X-factors
-GET  /api/stats             — dashboard stats
-GET  /api/costs             — API usage costs
+GET  /api/settings                   — all settings
+PUT  /api/settings                   — batch update
+POST /api/settings/validate          — validate a single API key (live test)
+GET  /api/settings/providers-status  — status of all providers
+POST /api/refresh/all                — trigger refresh for all bloggers
+POST /api/recalculate                — recalculate all X-factors
+GET  /api/stats                      — dashboard stats
+GET  /api/costs                      — API usage costs
 """
 from __future__ import annotations
 
@@ -16,6 +18,8 @@ import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from pydantic import BaseModel
 
 from backend.analyzer import recalculate_all_x_factors, update_blogger_stats
 from backend.database import get_all_settings_dict, get_db
@@ -29,6 +33,30 @@ from backend.schemas import (
     SettingsUpdate,
     StatusResponse,
 )
+
+
+class ValidateKeyRequest(BaseModel):
+    provider: str  # claude | openai | groq | assemblyai | apify
+    api_key: str
+
+
+class ValidateKeyResponse(BaseModel):
+    provider: str
+    ok: bool
+    message: str
+
+
+class ProviderStatus(BaseModel):
+    provider: str
+    label: str
+    configured: bool
+    ok: bool | None = None   # None = not tested yet
+    message: str = ""
+
+
+class ProvidersStatusResponse(BaseModel):
+    providers: list[ProviderStatus]
+    any_ai_ready: bool
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["settings"])
@@ -186,3 +214,134 @@ async def clear_cost_logs(db: Annotated[AsyncSession, Depends(get_db)]) -> OkRes
     await db.commit()
     logger.info("settings.costs_cleared")
     return OkResponse()
+
+
+# ── API Key validation ────────────────────────────────────────────────────────
+
+@router.post("/settings/validate", response_model=ValidateKeyResponse)
+async def validate_api_key(body: ValidateKeyRequest) -> ValidateKeyResponse:
+    """Send a minimal real request to verify the API key works."""
+    key = body.api_key.strip()
+    provider = body.provider.lower()
+
+    if not key:
+        return ValidateKeyResponse(provider=provider, ok=False, message="Ключ не может быть пустым")
+
+    try:
+        if provider == "claude":
+            result = await _validate_claude(key)
+        elif provider == "openai":
+            result = await _validate_openai(key)
+        elif provider == "groq":
+            result = await _validate_groq(key)
+        elif provider == "assemblyai":
+            result = await _validate_assemblyai(key)
+        elif provider == "apify":
+            result = await _validate_apify(key)
+        else:
+            return ValidateKeyResponse(provider=provider, ok=False, message=f"Неизвестный провайдер: {provider}")
+    except Exception as exc:
+        return ValidateKeyResponse(provider=provider, ok=False, message=str(exc)[:200])
+
+    return ValidateKeyResponse(provider=provider, **result)
+
+
+async def _validate_claude(key: str) -> dict:
+    import anthropic
+    client = anthropic.AsyncAnthropic(api_key=key)
+    msg = await client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=10,
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    return {"ok": True, "message": f"Работает ✓ (модель: {msg.model})"}
+
+
+async def _validate_openai(key: str) -> dict:
+    from openai import AsyncOpenAI
+    client = AsyncOpenAI(api_key=key)
+    resp = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=5,
+        messages=[{"role": "user", "content": "hi"}],
+    )
+    return {"ok": True, "message": f"Работает ✓ (модель: {resp.model})"}
+
+
+async def _validate_groq(key: str) -> dict:
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile", "max_tokens": 5,
+                  "messages": [{"role": "user", "content": "hi"}]},
+        )
+        if resp.status_code == 401:
+            return {"ok": False, "message": "Неверный ключ (401)"}
+        resp.raise_for_status()
+    return {"ok": True, "message": "Работает ✓ (Llama 3.3 70B, бесплатно)"}
+
+
+async def _validate_assemblyai(key: str) -> dict:
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            "https://api.assemblyai.com/v2/transcript",
+            headers={"authorization": key},
+            params={"limit": 1},
+        )
+        if resp.status_code == 401:
+            return {"ok": False, "message": "Неверный ключ (401)"}
+        resp.raise_for_status()
+    return {"ok": True, "message": "Работает ✓ (~$0.006 за 60 сек аудио)"}
+
+
+async def _validate_apify(key: str) -> dict:
+    import httpx
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(
+            "https://api.apify.com/v2/users/me",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+        if resp.status_code == 401:
+            return {"ok": False, "message": "Неверный ключ (401)"}
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        plan = data.get("plan", {}).get("id", "free")
+    return {"ok": True, "message": f"Работает ✓ (план: {plan})"}
+
+
+# ── Providers status ──────────────────────────────────────────────────────────
+
+@router.get("/settings/providers-status", response_model=ProvidersStatusResponse)
+async def get_providers_status(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ProvidersStatusResponse:
+    """Return which providers are configured (key set), without live-testing."""
+    result = await db.execute(select(Setting))
+    settings = {row.key: row.value for row in result.scalars().all()}
+
+    PROVIDERS = [
+        ("claude",      "Claude (Anthropic)",  "anthropic_api_key"),
+        ("openai",      "OpenAI",              "openai_api_key"),
+        ("groq",        "Groq / Llama",        "groq_api_key"),
+        ("assemblyai",  "AssemblyAI",          "assemblyai_api_key"),
+        ("apify",       "Apify",               "apify_api_key"),
+        ("vk",          "VK API",              "vk_access_token"),
+    ]
+
+    providers = [
+        ProviderStatus(
+            provider=pid,
+            label=label,
+            configured=bool(settings.get(key, "").strip()),
+        )
+        for pid, label, key in PROVIDERS
+    ]
+
+    any_ai_ready = any(
+        p.configured for p in providers if p.provider in ("claude", "openai", "groq")
+    )
+
+    return ProvidersStatusResponse(providers=providers, any_ai_ready=any_ai_ready)

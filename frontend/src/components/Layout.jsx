@@ -1,12 +1,14 @@
 import React from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Users, FileText, Settings, RefreshCw, Zap } from 'lucide-react'
+import { LayoutDashboard, Users, FileText, Settings, RefreshCw, Zap, Sparkles, History } from 'lucide-react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api.js'
 import { useStore } from '../store.js'
 import { timeAgo } from '../utils.js'
 
 const NAV_ITEMS = [
+  { to: '/analyze', icon: Sparkles, label: 'Разбор', highlight: true },
+  { to: '/my-videos', icon: History, label: 'Мои разборы' },
   { to: '/dashboard', icon: LayoutDashboard, label: 'Тренды' },
   { to: '/bloggers', icon: Users, label: 'Блогеры' },
   { to: '/scripts', icon: FileText, label: 'Сценарии' },
@@ -69,7 +71,7 @@ export default function Layout() {
 
         {/* Nav */}
         <nav style={{ flex: 1, padding: '0 12px' }}>
-          {NAV_ITEMS.map(({ to, icon: Icon, label }) => (
+          {NAV_ITEMS.map(({ to, icon: Icon, label, highlight }) => (
             <NavLink
               key={to}
               to={to}
@@ -79,13 +81,14 @@ export default function Layout() {
                 gap: 10,
                 padding: '9px 12px',
                 borderRadius: 6,
-                marginBottom: 2,
-                color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
-                background: isActive ? 'rgba(229,224,0,0.08)' : 'transparent',
+                marginBottom: highlight ? 8 : 2,
+                color: isActive ? 'var(--accent)' : highlight ? 'var(--accent)' : 'var(--text-secondary)',
+                background: isActive ? 'rgba(229,224,0,0.12)' : highlight ? 'rgba(229,224,0,0.06)' : 'transparent',
                 textDecoration: 'none',
-                fontWeight: isActive ? 600 : 400,
+                fontWeight: isActive || highlight ? 600 : 400,
                 fontSize: 14,
                 transition: 'all 0.15s',
+                border: highlight && !isActive ? '1px solid rgba(229,224,0,0.15)' : '1px solid transparent',
               })}
             >
               <Icon size={16} />

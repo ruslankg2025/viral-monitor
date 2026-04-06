@@ -286,3 +286,51 @@ class OkResponse(BaseModel):
 
 class RecalcResponse(BaseModel):
     updated: int
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Analyze-URL schemas
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class AnalyzeUrlRequest(BaseModel):
+    url: str = Field(..., min_length=5)
+
+
+class AnalyzeUrlResponse(BaseModel):
+    video_id: int
+    status: str          # "new" | "existing"
+    platform: str
+    message: str
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Hooks schemas
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class HookVariant(BaseModel):
+    number: int
+    text: str
+    technique: str        # контраст | угроза_времени | факт+дата | etc
+    mechanism: str        # психологический механизм
+    rating: str           # Лучший выбор | Сильный | Альтернатива
+    timing: str           # "0-3 сек"
+
+
+class HooksResponse(BaseModel):
+    video_id: int
+    hooks: list[HookVariant]
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Improve script schemas
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class ImproveRequest(BaseModel):
+    action: str = "custom"   # усилить_зацепку | сократить | добавить_конкретики | переписать_начало | упростить | custom
+    custom_prompt: str | None = None
+    current_text: str = Field(..., min_length=10)
+
+
+class ImproveResponse(BaseModel):
+    improved_text: str
+    changes_made: str

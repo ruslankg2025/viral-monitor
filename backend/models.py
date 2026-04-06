@@ -97,6 +97,9 @@ class Video(Base):
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     is_favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     is_analyzed: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_standalone: Mapped[bool] = mapped_column(Boolean, default=False)  # parsed via /analyze-url
+    hooks: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON, nullable=True)
+    reel_description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     blogger: Mapped["Blogger"] = relationship("Blogger", back_populates="videos")
     scripts: Mapped[list["Script"]] = relationship(

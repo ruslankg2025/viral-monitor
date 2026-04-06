@@ -52,11 +52,11 @@ class ApifyInstagramParser(BasePlatformParser):
         items = await self._actor.run_actor(
             ACTOR_ID,
             {
-                "usernames": [username],
+                "directUrls": [f"https://www.instagram.com/{username}/"],
+                "resultsType": "posts",
                 "resultsLimit": limit,
-                "onlyPostsWithMedia": True,
             },
-            timeout_secs=120,
+            timeout_secs=180,
         )
 
         videos: list[VideoData] = []

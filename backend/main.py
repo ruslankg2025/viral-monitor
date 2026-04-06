@@ -110,12 +110,14 @@ from backend.routers.videos import router as videos_router
 from backend.routers.analysis import router as analysis_router
 from backend.routers.scripts import router as scripts_router
 from backend.routers.settings import router as settings_router
+from backend.routers.analyze import router as analyze_router
 
 app.include_router(bloggers_router, prefix="/api")
 app.include_router(videos_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
 app.include_router(scripts_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
+app.include_router(analyze_router, prefix="/api")
 
 
 @app.get("/api/health")

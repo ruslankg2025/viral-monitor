@@ -297,6 +297,149 @@ class AIRouter:
 
         raise RuntimeError("Ни один AI-провайдер не доступен для генерации сценариев")
 
+    # ── LEVEL 3: Generate hooks ───────────────────────────────────────────────
+
+    async def generate_hooks(
+        self,
+        ai_analysis: dict[str, Any],
+        transcript: str = "",
+    ) -> list[dict[str, Any]]:
+        """Generate 5 hook variants with psychological analysis. Claude → GPT-4o fallback."""
+        settings = await get_all_settings_dict()
+        prompt = PROMPTS["generate_hooks"]
+        system = prompt["system"]
+        user = prompt["user"].format(
+            ai_analysis=json.dumps(ai_analysis, ensure_ascii=False, indent=2),
+            transcript_start=transcript[:500] if transcript else "(транскрипция недоступна)",
+        )
+
+        claude_key = settings.get("anthropic_api_key", "")
+        openai_key = settings.get("openai_api_key", "")
+
+        if claude_key:
+            try:
+                parsed, resp = await self._claude_client(claude_key).complete_json(
+                    system, user, max_tokens=2000
+                )
+                await self._log_usage(resp, "generate_hooks")
+                return parsed if isinstance(parsed, list) else parsed.get("hooks", [parsed]) if isinstance(parsed, dict) else []
+            except Exception as exc:
+                logger.warning("ai_router.claude_hooks_failed", error=str(exc))
+                await self._log_error("claude", "generate_hooks", str(exc))
+
+        if openai_key:
+            try:
+                parsed, resp = await self._openai_client(openai_key).complete_json(
+                    system, user, model="gpt-4o", max_tokens=2000
+                )
+                await self._log_usage(resp, "generate_hooks")
+                return parsed if isinstance(parsed, list) else []
+            except Exception as exc:
+                logger.error("ai_router.hooks_all_failed", error=str(exc))
+                await self._log_error("openai", "generate_hooks", str(exc))
+
+        raise RuntimeError("Ни один AI-провайдер не доступен для генерации хуков")
+
+    # ── LEVEL 3: Improve script ───────────────────────────────────────────────
+
+    async def improve_script(
+        self,
+        action: str,
+        current_text: str,
+        custom_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Improve script by command. Claude → GPT-4o fallback."""
+        settings = await get_all_settings_dict()
+
+        ACTION_LABELS = {
+            "усилить_зацепку": "Усилить зацепку — сделай первые 3 секунды более цепляющими, провокационными",
+            "сократить": "Сократить — убери воду, оставь только суть, сократи на 30-40%",
+            "добавить_конкретики": "Добавить конкретики — добавь факты, цифры, конкретные примеры",
+            "переписать_начало": "Переписать начало — придумай принципиально другой хук, другой угол подачи",
+            "упростить": "Упростить язык — перепиши проще, как будто объясняешь другу",
+            "custom": custom_prompt or "Улучши по своему усмотрению",
+        }
+        action_label = ACTION_LABELS.get(action, action)
+        custom_instruction = f"Дополнительные пожелания: {custom_prompt}\n\n" if custom_prompt and action != "custom" else ""
+
+        prompt = PROMPTS["improve_script"]
+        system = prompt["system"]
+        user = prompt["user"].format(
+            action_label=action_label,
+            current_text=current_text,
+            custom_instruction=custom_instruction,
+        )
+
+        claude_key = settings.get("anthropic_api_key", "")
+        openai_key = settings.get("openai_api_key", "")
+
+        if claude_key:
+            try:
+                parsed, resp = await self._claude_client(claude_key).complete_json(
+                    system, user, max_tokens=2000
+                )
+                await self._log_usage(resp, "improve_script")
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception as exc:
+                logger.warning("ai_router.claude_improve_failed", error=str(exc))
+                await self._log_error("claude", "improve_script", str(exc))
+
+        if openai_key:
+            try:
+                parsed, resp = await self._openai_client(openai_key).complete_json(
+                    system, user, model="gpt-4o", max_tokens=2000
+                )
+                await self._log_usage(resp, "improve_script")
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception as exc:
+                logger.error("ai_router.improve_all_failed", error=str(exc))
+                await self._log_error("openai", "improve_script", str(exc))
+
+        raise RuntimeError("Ни один AI-провайдер не доступен для улучшения сценария")
+
+    # ── LEVEL 3: Reel description ─────────────────────────────────────────────
+
+    async def generate_reel_description(
+        self,
+        platform: str,
+        hook: str,
+        key_insight: str,
+    ) -> dict[str, Any]:
+        """Generate reel description + hashtags. Claude → GPT-4o fallback."""
+        settings = await get_all_settings_dict()
+        prompt = PROMPTS["reel_description"]
+        system = prompt["system"]
+        user = prompt["user"].format(
+            platform=platform,
+            hook=hook,
+            key_insight=key_insight,
+        )
+
+        claude_key = settings.get("anthropic_api_key", "")
+        openai_key = settings.get("openai_api_key", "")
+
+        if claude_key:
+            try:
+                parsed, resp = await self._claude_client(claude_key).complete_json(
+                    system, user, max_tokens=500
+                )
+                await self._log_usage(resp, "reel_description")
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception as exc:
+                logger.warning("ai_router.claude_reel_desc_failed", error=str(exc))
+
+        if openai_key:
+            try:
+                parsed, resp = await self._openai_client(openai_key).complete_json(
+                    system, user, model="gpt-4o-mini", max_tokens=500
+                )
+                await self._log_usage(resp, "reel_description")
+                return parsed if isinstance(parsed, dict) else {}
+            except Exception as exc:
+                logger.error("ai_router.reel_desc_all_failed", error=str(exc))
+
+        return {"description": "", "hashtags": []}
+
     # ── LEVEL 2: Blogger patterns ─────────────────────────────────────────────
 
     async def find_blogger_patterns(

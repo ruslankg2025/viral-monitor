@@ -103,15 +103,47 @@ async def init_db() -> None:
 
 
 async def _seed_settings() -> None:
-    """Insert missing settings with defaults (idempotent)."""
+    """Insert missing settings with defaults (idempotent).
+
+    Priority: .env value (if non-empty) > DB existing value > hardcoded default.
+    This means filling .env and restarting will populate the DB on first run.
+    """
     from sqlalchemy import select
     from backend.models import Setting
+
+    settings = get_settings()
+    # Map DB setting keys → env/config attribute names
+    ENV_MAP: dict[str, str] = {
+        "anthropic_api_key": "anthropic_api_key",
+        "openai_api_key": "openai_api_key",
+        "groq_api_key": "groq_api_key",
+        "assemblyai_api_key": "assemblyai_api_key",
+        "apify_api_key": "apify_api_key",
+        "vk_access_token": "vk_access_token",
+        "instagram_session_id": "instagram_session_id",
+        "tiktok_api_key": "tiktok_api_key",
+        "outlier_threshold": "outlier_threshold",
+        "refresh_interval_hours": "refresh_interval_hours",
+        "max_videos_per_blogger": "max_videos_per_blogger",
+    }
 
     async with db_session() as session:
         for key, default_value in DB_SETTINGS_DEFAULTS.items():
             result = await session.execute(select(Setting).where(Setting.key == key))
-            if result.scalar_one_or_none() is None:
-                session.add(Setting(key=key, value=default_value))
+            existing = result.scalar_one_or_none()
+
+            # Prefer value from .env if it's non-empty
+            env_attr = ENV_MAP.get(key)
+            env_value = str(getattr(settings, env_attr, "") or "") if env_attr else ""
+
+            if existing is None:
+                # New row: use .env value if set, otherwise default
+                value = env_value if env_value.strip() else default_value
+                session.add(Setting(key=key, value=value))
+            elif env_value.strip() and not existing.value.strip():
+                # Row exists but is empty → fill from .env
+                existing.value = env_value
+
         await session.commit()
     logger.info("database.settings_seeded")
 
