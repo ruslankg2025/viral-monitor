@@ -74,30 +74,50 @@ class InstagrapiInstagramParser(BasePlatformParser):
                 cl = self._get_client()
                 user_id = cl.user_id_from_username(username)
 
-                # Fetch reels/clips
+                # user_medias uses GraphQL and returns full stats including view_count
+                try:
+                    medias = cl.user_medias(user_id, amount=limit)
+                except Exception:
+                    medias = []
+
+                # Also try user_clips for reels not in medias feed
                 try:
                     clips = cl.user_clips(user_id, amount=limit)
                 except Exception:
                     clips = []
 
-                # Also fetch regular video posts
-                try:
-                    medias = cl.user_medias(user_id, amount=limit)
-                    video_medias = [m for m in medias if m.media_type in (2, 8)]
-                except Exception:
-                    video_medias = []
+                # Merge, deduplicate by pk — prefer medias (has full stats)
+                seen: dict = {}
+                for media in list(medias) + list(clips):
+                    if media.pk not in seen:
+                        seen[media.pk] = media
+                    else:
+                        # Keep the one with higher view_count (medias usually wins)
+                        existing = seen[media.pk]
+                        ev = (existing.view_count or 0) + (existing.play_count or 0)
+                        mv = (media.view_count or 0) + (media.play_count or 0)
+                        if mv > ev:
+                            seen[media.pk] = media
 
-                # Merge, deduplicate by pk
-                seen = set()
-                all_items = list(clips) + list(video_medias)
-                for media in all_items:
-                    if media.pk in seen:
+                for media in seen.values():
+                    # Only video types: 2=video, 8=album (may contain video)
+                    if media.media_type not in (2, 8):
                         continue
-                    seen.add(media.pk)
 
                     published = media.taken_at.replace(tzinfo=None) if media.taken_at else None
                     if after and published and published <= after:
                         continue
+
+                    # If view_count is 0, try fetching full media_info (costs 1 extra request)
+                    view_count = media.view_count or media.play_count or 0
+                    if view_count == 0:
+                        try:
+                            full = cl.media_info(media.pk)
+                            view_count = full.view_count or full.play_count or 0
+                            if full.thumbnail_url:
+                                media.thumbnail_url = full.thumbnail_url
+                        except Exception:
+                            pass
 
                     thumb = str(media.thumbnail_url) if media.thumbnail_url else None
                     code = media.code or str(media.pk)
@@ -108,7 +128,7 @@ class InstagrapiInstagramParser(BasePlatformParser):
                         title=(media.caption_text or "")[:200] or None,
                         description=media.caption_text,
                         thumbnail_url=thumb,
-                        views=media.view_count or media.play_count or 0,
+                        views=view_count,
                         likes=media.like_count or 0,
                         comments=media.comment_count or 0,
                         shares=0,

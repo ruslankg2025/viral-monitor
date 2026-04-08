@@ -141,9 +141,12 @@ async def _background_fetch(blogger_id: int) -> None:
                     ).limit(1)
                 )
                 scraper = scraper_result.scalar_one_or_none()
-                if scraper and scraper.session_json:
-                    from backend.parsers.instagram_instagrapi import InstagrapiInstagramParser
-                    parser = InstagrapiInstagramParser(session_json=scraper.session_json)
+                if scraper:
+                    # Use factory: prefers Apify+sessionid (residential proxy) over direct instagrapi
+                    parser = parser_factory.get_instagram_parser_for_account(
+                        scraper_session_json=scraper.session_json,
+                        apify_key=settings.get("apify_api_key", ""),
+                    )
 
             if parser is None:
                 parser = parser_factory.get_parser(blogger.platform, settings)

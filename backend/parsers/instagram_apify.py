@@ -15,7 +15,7 @@ from backend.schemas import BloggerProfile, VideoData
 
 logger = structlog.get_logger(__name__)
 
-ACTOR_ID = "apify/instagram-scraper"            # Posts/reels by username
+ACTOR_ID = "apify/instagram-reel-scraper"        # Reels by username
 PROFILE_ACTOR_ID = "apify/instagram-profile-scraper"
 
 
@@ -51,23 +51,14 @@ class ApifyInstagramParser(BasePlatformParser):
         after: datetime | None = None,
     ) -> list[VideoData]:
         run_input: dict = {
-            "usernames": [username],
-            "resultsType": "posts",
+            "username": [username],
             "resultsLimit": limit,
         }
-        if self._session_id:
-            run_input["sessionCookies"] = [
-                {"name": "sessionid", "value": self._session_id, "domain": ".instagram.com"}
-            ]
 
         items = await self._actor.run_actor(ACTOR_ID, run_input, timeout_secs=180)
 
         videos: list[VideoData] = []
         for item in items:
-            # Skip non-video posts
-            if not item.get("isVideo") and not item.get("is_video") and not item.get("videoViewCount"):
-                continue
-
             published = _parse_timestamp(item.get("timestamp") or item.get("taken_at_timestamp"))
             if after and published and published <= after:
                 continue
@@ -77,20 +68,23 @@ class ApifyInstagramParser(BasePlatformParser):
                 continue
 
             views = int(
-                item.get("videoViewCount")
-                or item.get("video_view_count")
+                item.get("videoPlayCount")
+                or item.get("videoViewCount")
                 or item.get("playCount")
-                or item.get("likesCount")  # fallback for images
                 or 0
             )
+
+            # Thumbnail: first image or displayUrl
+            images = item.get("images") or []
+            thumb = images[0] if images else item.get("displayUrl") or item.get("thumbnailUrl")
 
             videos.append(
                 VideoData(
                     external_id=video_id,
-                    url=f"https://www.instagram.com/reel/{video_id}/",
+                    url=item.get("url") or f"https://www.instagram.com/reel/{video_id}/",
                     title=_truncate(item.get("caption") or item.get("alt"), 200),
                     description=item.get("caption") or item.get("alt"),
-                    thumbnail_url=item.get("displayUrl") or item.get("thumbnailUrl"),
+                    thumbnail_url=thumb,
                     views=views,
                     likes=int(item.get("likesCount") or item.get("likes_count") or 0),
                     comments=int(item.get("commentsCount") or item.get("comments_count") or 0),

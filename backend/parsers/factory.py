@@ -11,6 +11,20 @@ from backend.parsers.base import BasePlatformParser
 logger = structlog.get_logger(__name__)
 
 
+def _extract_sessionid(session_json: str | None) -> str | None:
+    """Extract Instagram sessionid cookie from instagrapi session JSON."""
+    if not session_json:
+        return None
+    try:
+        import json
+        data = json.loads(session_json)
+        # instagrapi stores cookies under 'cookies' key
+        cookies = data.get("cookies", {})
+        return cookies.get("sessionid") or None
+    except Exception:
+        return None
+
+
 class ParserFactory:
     def get_parser(self, platform: str, settings: dict[str, str]) -> BasePlatformParser:
         """
@@ -67,15 +81,24 @@ class ParserFactory:
         scraper_session_json: str | None,
         apify_key: str,
     ) -> BasePlatformParser:
-        """Return the best Instagram parser given a scraper session (if any)."""
-        if scraper_session_json:
+        """Return the best Instagram parser given a scraper session (if any).
+
+        Strategy: prefer Apify + sessionid cookie (residential proxy bypasses IP blocks).
+        Fall back to instagrapi (direct) only when Apify key is missing.
+        """
+        session_id = _extract_sessionid(scraper_session_json)
+
+        if apify_key:
+            from backend.parsers.instagram_apify import ApifyInstagramParser
+            if session_id:
+                logger.info("parser_factory.instagram=apify+session")
+            else:
+                logger.info("parser_factory.instagram=apify_anon")
+            return ApifyInstagramParser(apify_key, session_id=session_id)
+        elif scraper_session_json:
             from backend.parsers.instagram_instagrapi import InstagrapiInstagramParser
             logger.info("parser_factory.instagram=instagrapi_session_json")
             return InstagrapiInstagramParser(session_json=scraper_session_json)
-        elif apify_key:
-            from backend.parsers.instagram_apify import ApifyInstagramParser
-            logger.info("parser_factory.instagram=apify")
-            return ApifyInstagramParser(apify_key)
         else:
             from backend.parsers.instagram_legacy import LegacyInstagramParser
             logger.info("parser_factory.instagram=legacy_anon")
